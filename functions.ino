@@ -2,9 +2,25 @@
       SUPPORT FUNCTIONS     
 ===========================*/
 
+/*
+ * Get temperature and humidity from DHT sensor
+ * 
+ * params: none
+ * 
+ * return: none
+ */
 void getSensorData() {
   float t = dht.readTemperature(true);
   float h = dht.readHumidity();
+  Serial.println("---------------------------");
+  Serial.println("Raw sensor data:");
+  Serial.print("Temperature: ");
+  Serial.print(t);
+  Serial.println(" F");
+  Serial.print("Humidity:    ");
+  Serial.print(h);
+  Serial.println(" %");
+  Serial.println("---------------------------\n");
   if (isDHTPlausible(t, h)) {
     sys.temperature = t;
     sys.humidity = h;
@@ -19,7 +35,8 @@ void getSensorData() {
  * 
  * params: none
  * 
- * return: none
+ * return: bool
+ * - true if response from post request is successful
  * 
  * example:
  * {
@@ -29,13 +46,13 @@ void getSensorData() {
  *   "deviceId": 12
  * }
  */
-void postSensorData() {
+bool postSensorData() {
   if (WiFi.status() == WL_CONNECTED) {
     char data[100];
     char _t[6];
     char _h[6];
     char _id[2];
-    char _deviceId[3];
+    char _deviceId[5];
     sprintf(_t, "%.2f", sys.temperature);
     sprintf(_h, "%.2f", sys.humidity);
     sprintf(_id, "%d", sys.id);
@@ -51,16 +68,37 @@ void postSensorData() {
     strcat(data, ",\"isRapid\": ");
     strcat(data, sys.isRapid ? "true": "false");
     strcat(data, "}");
+    Serial.println("---------------------------");
+    Serial.println(data);
+    Serial.println("---------------------------\n");
 
-    http.begin(SERVER_ADDR, HTTP_PORT, "/sensor");
+    http.begin(SERVER_ADDR, HTTP_PORT, "/sensor/update");
     http.addHeader("content-type", "application/json");
     int statusCode = http.POST(data);
     String response = http.getString();
     http.end();
 
     if (statusCode == 200) {
-      sys.selectedDelay = response == "inactive" ? LONG_REPORT_DELAY: RAPID_REPORT_DELAY;
-      postRapidConfirmation();
+      Serial.println("Data POST successful");
+      int delimiter = response.lastIndexOf(":");
+      if (sys.id == -1 && delimiter != -1) {
+        sys.selectedDelay = response.substring(0, delimiter) == "inactive" ? LONG_REPORT_DELAY: RAPID_REPORT_DELAY;
+        int _id = response.substring(delimiter + 1).toInt();
+        if (_id) {
+          sys.id = _id;
+        } else {
+          // TODO post error to server
+          return false;
+        }
+      } else if (sys.id != -1 && delimiter == -1) {
+        sys.selectedDelay = response == "inactive" ? LONG_REPORT_DELAY: RAPID_REPORT_DELAY;
+      } else {
+        // TODO post error to server
+        return false;
+      }
+      return true;
+    } else {
+      return false;
     }
   }
 }
@@ -75,6 +113,9 @@ void postRapidConfirmation() {
     strcat(data, ",\"isRapid\": ");
     strcat(data, sys.isRapid ? "true": "false");
     strcat(data, "}");
+    Serial.println("---------------------------");
+    Serial.println(data);
+    Serial.println("---------------------------\n");
 
     http.begin(SERVER_ADDR, HTTP_PORT, "/sensor/confirm-rapid");
     http.addHeader("content-type", "application/json");
